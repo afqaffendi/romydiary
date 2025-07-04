@@ -1,181 +1,417 @@
+import 'dart:math';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:liquid_pull_to_refresh/liquid_pull_to_refresh.dart';
-import 'package:animated_text_kit/animated_text_kit.dart';
+import 'package:shimmer/shimmer.dart';
+import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:confetti/confetti.dart';
 import 'sql_helper.dart';
 
+class GlassContainer extends StatelessWidget {
+  final Widget child;
+  final double borderRadius;
+  final double blur;
+  final double border;
+
+  const GlassContainer({
+    Key? key,
+    required this.child,
+    this.borderRadius = 20,
+    this.blur = 10,
+    this.border = 1,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(
+          width: border,
+          color: Colors.white.withOpacity(0.2),
+        ),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withOpacity(0.15),
+            Colors.white.withOpacity(0.05),
+          ],
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({Key? key}) : super(key: key);
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   late ConfettiController _confettiController;
   List<Map<String, dynamic>> _journals = [];
   bool _isLoading = true;
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
+  final Random _random = Random();
+  bool _isSaving = false;
+  bool _showDebugButton = false; // For testing purposes
 
   @override
   void initState() {
     super.initState();
-    _confettiController =
-        ConfettiController(duration: const Duration(seconds: 1));
+    _confettiController = ConfettiController(duration: const Duration(seconds: 1));
     _initializeApp();
   }
 
   Future<void> _initializeApp() async {
     try {
-      await SQLHelper.database; // initialize DB
+      debugPrint('Initializing database...');
+      final db = await SQLHelper.database;
+      final tables = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='journals'"
+      );
+      debugPrint('Existing tables: $tables');
+      
+      if (tables.isEmpty) {
+        debugPrint('Creating journals table...');
+        await db.execute('''
+          CREATE TABLE journals(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            createdAt TEXT NOT NULL
+          )
+        ''');
+      }
       await _refreshJournals();
     } catch (e) {
-      _showError('Failed to initialize: $e');
+      debugPrint('Initialization error: $e');
+      _showError('Failed to initialize app: ${e.toString()}');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   Future<void> _refreshJournals() async {
     try {
+      debugPrint('Refreshing journals...');
       final data = await SQLHelper.getItems();
-      setState(() => _journals = data);
+      debugPrint('Retrieved ${data.length} items');
+      
+      if (mounted) {
+        setState(() {
+          _journals = data;
+          debugPrint('Journals updated: ${_journals.length} items');
+        });
+      }
     } catch (e) {
-      _showError('Failed to load entries: $e');
+      debugPrint('Refresh error: $e');
+      _showError('Failed to load entries: ${e.toString()}');
     }
   }
 
-  Future<void> _handleRefresh() async {
-    await _refreshJournals();
-  }
-
   Future<void> _addItem() async {
+    if (_titleController.text.isEmpty) {
+      _showError('Title cannot be empty');
+      return;
+    }
+
+    setState(() => _isSaving = true);
     try {
-      await SQLHelper.createItem(
+      debugPrint('Saving item: ${_titleController.text}');
+      final id = await SQLHelper.createItem(
         _titleController.text,
         _descriptionController.text,
       );
-      await _refreshJournals();
-      _confettiController.play();
+      
+      debugPrint('Saved item with ID: $id');
+
+      if (id > 0) {
+        _titleController.clear();
+        _descriptionController.clear();
+        await _refreshJournals();
+        _confettiController.play();
+        _showMessage('Memory saved successfully! ✨');
+      } else {
+        _showError('Failed to save memory');
+      }
     } catch (e) {
-      _showError('Failed to add memory: $e');
+      debugPrint('Save error: $e');
+      _showError('Error saving memory: ${e.toString()}');
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 
   Future<void> _updateItem(int id) async {
+    if (_titleController.text.isEmpty) {
+      _showError('Title cannot be empty');
+      return;
+    }
+
+    setState(() => _isSaving = true);
     try {
-      await SQLHelper.updateItem(
+      final rowsAffected = await SQLHelper.updateItem(
         id,
         _titleController.text,
         _descriptionController.text,
       );
-      await _refreshJournals();
+      
+      if (rowsAffected > 0) {
+        _titleController.clear();
+        _descriptionController.clear();
+        await _refreshJournals();
+        _showMessage('Memory updated successfully!');
+      } else {
+        _showError('Failed to update memory');
+      }
     } catch (e) {
-      _showError('Failed to update memory: $e');
+      _showError('Error updating memory: ${e.toString()}');
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 
   Future<void> _deleteItem(int id) async {
     try {
-      await SQLHelper.deleteItem(id);
-      await _refreshJournals();
+      final rowsAffected = await SQLHelper.deleteItem(id);
+      if (rowsAffected > 0) {
+        await _refreshJournals();
+        _showMessage('Memory deleted successfully');
+      } else {
+        _showError('Failed to delete memory');
+      }
     } catch (e) {
-      _showError('Failed to delete memory: $e');
+      _showError('Error deleting memory: ${e.toString()}');
     }
   }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
-
   void _showForm(int? id) {
-    if (id == null) {
-      // New entry — clear controllers
-      _titleController.clear();
-      _descriptionController.clear();
-    } else {
-      // Editing existing entry — fill controllers
-      final existingJournal =
-          _journals.firstWhere((element) => element['id'] == id);
+    if (id != null) {
+      final existingJournal = _journals.firstWhere((element) => element['id'] == id);
       _titleController.text = existingJournal['title'];
-      _descriptionController.text = existingJournal['description'];
+      _descriptionController.text = existingJournal['description'] ?? '';
     }
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 10,
-              spreadRadius: 5,
-            )
-          ],
+      builder: (_) => GlassContainer(
+        blur: 15,
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 20),
+              Text(
+                id == null ? '✨ New Memory' : '✏️ Edit Memory',
+                style: GoogleFonts.quicksand(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: TextField(
+                  controller: _titleController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'Title',
+                    labelStyle: const TextStyle(color: Colors.white70),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.1),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 15),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: TextField(
+                  controller: _descriptionController,
+                  style: const TextStyle(color: Colors.white),
+                  maxLines: 5,
+                  decoration: InputDecoration(
+                    labelText: 'Description',
+                    labelStyle: const TextStyle(color: Colors.white70),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.1),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      backgroundColor: Colors.deepPurple.withOpacity(0.8),
+                    ),
+                    onPressed: _isSaving ? null : () async {
+                      Navigator.pop(context);
+                      if (id == null) {
+                        await _addItem();
+                      } else {
+                        await _updateItem(id);
+                      }
+                    },
+                    child: _isSaving
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : Text(
+                            id == null ? 'Save Memory' : 'Update',
+                            style: GoogleFonts.quicksand(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
         ),
-        padding: EdgeInsets.only(
-          top: 20,
-          left: 20,
-          right: 20,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      ),
+    );
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
           children: [
-            Text(
-              id == null ? 'New Memory' : 'Edit Memory',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _titleController,
-              decoration: InputDecoration(
-                labelText: 'Title',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-            const SizedBox(height: 15),
-            TextField(
-              controller: _descriptionController,
-              decoration: InputDecoration(
-                labelText: 'Description',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              maxLines: 5,
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 50),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onPressed: () async {
-                Navigator.pop(context);
-                if (id == null) {
-                  await _addItem();
-                } else {
-                  await _updateItem(id);
-                }
-              },
-              child: Text(
-                id == null ? 'Save Memory' : 'Update',
-                style: const TextStyle(fontSize: 16),
-              ),
-            )
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(message),
           ],
+        ),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.error, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(message),
+          ],
+        ),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Widget _buildJournalCard(Map<String, dynamic> journal, BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: GlassContainer(
+        blur: 10,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => _showForm(journal['id']),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        journal['title'],
+                        style: GoogleFonts.quicksand(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.white70),
+                      onPressed: () => _deleteItem(journal['id']),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  journal['description'] ?? '',
+                  style: GoogleFonts.quicksand(
+                    color: Colors.white70,
+                  ),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text(
+                      journal['createdAt'] != null 
+                          ? journal['createdAt'].toString().substring(0, 10)
+                          : '',
+                      style: GoogleFonts.quicksand(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -184,173 +420,179 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showForm(null),
-        child: const Icon(Icons.add, size: 28),
-        backgroundColor: Theme.of(context).primaryColor,
-        elevation: 4,
-      ),
+      backgroundColor: const Color(0xFF0F0B21),
       body: Stack(
         children: [
+          CustomPaint(
+            painter: _StarsPainter(random: _random),
+            size: Size.infinite,
+          ),
+          
           LiquidPullToRefresh(
-            onRefresh: _handleRefresh,
-            color: Theme.of(context).primaryColor,
+            onRefresh: _refreshJournals,
+            color: Colors.deepPurple,
             height: 150,
             animSpeedFactor: 2,
             showChildOpacityTransition: false,
             child: CustomScrollView(
               slivers: [
                 SliverAppBar(
-                  expandedHeight: 150,
+                  expandedHeight: 200,
                   flexibleSpace: FlexibleSpaceBar(
-                    title: AnimatedTextKit(
-                      animatedTexts: [
-                        TypewriterAnimatedText(
-                          'Dream Diary',
-                          textStyle: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
+                    title: Text(
+                      'Dream Diary',
+                      style: GoogleFonts.quicksand(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        shadows: [
+                          Shadow(
+                            blurRadius: 10,
+                            color: Colors.deepPurple.withOpacity(0.5),
                           ),
-                          speed: const Duration(milliseconds: 100),
-                        ),
-                      ],
-                      totalRepeatCount: 1,
+                        ],
+                      ),
                     ),
-                    background: Image.asset(
-                      'assets/image/diary_bg.jpeg',
-                      fit: BoxFit.cover,
+                    background: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.deepPurple.withOpacity(0.7),
+                            Colors.purple.withOpacity(0.5),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                   pinned: true,
+                  actions: [
+                    IconButton(
+                      icon: const Icon(Icons.bug_report),
+                      onPressed: () {
+                        setState(() => _showDebugButton = !_showDebugButton);
+                      },
+                    ),
+                  ],
                 ),
+                
                 _isLoading
-                    ? const SliverFillRemaining(
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    : _journals.isEmpty
-                        ? SliverFillRemaining(
-                            child: Center(
+                    ? SliverToBoxAdapter(
+                        child: SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.6,
+                          child: Center(
+                            child: Shimmer.fromColors(
+                              baseColor: Colors.deepPurple.withOpacity(0.2),
+                              highlightColor: Colors.deepPurple.withOpacity(0.4),
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(
-                                    Icons.book,
-                                    size: 60,
-                                    color: Colors.grey[400],
-                                  ),
+                                  const Icon(Icons.auto_awesome, size: 50),
                                   const SizedBox(height: 20),
                                   Text(
-                                    'No memories yet!\nTap + to add your first entry',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
+                                    'Loading your dreams...',
+                                    style: GoogleFonts.quicksand(
                                       fontSize: 18,
-                                      color: Colors.grey[600],
                                     ),
                                   ),
                                 ],
                               ),
                             ),
+                          ),
+                        ),
+                      )
+                    : _journals.isEmpty
+                        ? SliverToBoxAdapter(
+                            child: SizedBox(
+                              height: MediaQuery.of(context).size.height * 0.6,
+                              child: Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.auto_awesome,
+                                      size: 60,
+                                      color: Colors.deepPurple.withOpacity(0.5),
+                                    ),
+                                    const SizedBox(height: 20),
+                                    Text(
+                                      'No dreams recorded yet!\nTap the + button to begin',
+                                      textAlign: TextAlign.center,
+                                      style: GoogleFonts.quicksand(
+                                        fontSize: 18,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           )
-                        : SliverList(
-                            delegate: SliverChildBuilderDelegate(
-                              (context, index) {
-                                final journal = _journals[index];
-                                return Card(
-                                  margin: const EdgeInsets.all(12),
-                                  elevation: 3,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(15),
-                                  ),
-                                  child: InkWell(
-                                    borderRadius: BorderRadius.circular(15),
-                                    onTap: () => _showForm(journal['id']),
-                                    onLongPress: () => showDialog(
-                                      context: context,
-                                      builder: (ctx) => AlertDialog(
-                                        title: const Text('Delete Memory'),
-                                        content: const Text(
-                                            'Are you sure you want to delete this memory?'),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () {
-                                              Navigator.of(ctx).pop();
-                                            },
-                                            child: const Text('Cancel'),
-                                          ),
-                                          TextButton(
-                                            onPressed: () async {
-                                              Navigator.of(ctx).pop();
-                                              await _deleteItem(journal['id']);
-                                            },
-                                            child: const Text(
-                                              'Delete',
-                                              style: TextStyle(color: Colors.red),
-                                            ),
-                                          ),
-                                        ],
+                        : SliverPadding(
+                            padding: const EdgeInsets.all(16),
+                            sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) {
+                                  final journal = _journals[index];
+                                  return AnimationConfiguration.staggeredList(
+                                    position: index,
+                                    duration: const Duration(milliseconds: 500),
+                                    child: SlideAnimation(
+                                      verticalOffset: 50.0,
+                                      child: FadeInAnimation(
+                                        child: _buildJournalCard(journal, context),
                                       ),
                                     ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(16),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            journal['title'],
-                                            style: const TextStyle(
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            journal['description'],
-                                            maxLines: 3,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: 12),
-                                          Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.end,
-                                            children: [
-                                              Text(
-                                                journal['createdAt']
-                                                    .toString()
-                                                    .substring(0, 10),
-                                                style: TextStyle(
-                                                  color: Colors.grey[600],
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                              childCount: _journals.length,
+                                  );
+                                },
+                                childCount: _journals.length,
+                              ),
                             ),
                           ),
               ],
             ),
           ),
+          
           ConfettiWidget(
             confettiController: _confettiController,
             blastDirectionality: BlastDirectionality.explosive,
             shouldLoop: false,
             colors: const [
-              Colors.green,
+              Colors.purple,
+              Colors.deepPurple,
               Colors.blue,
               Colors.pink,
-              Colors.orange,
-              Colors.purple,
             ],
           ),
         ],
       ),
+      
+      floatingActionButton: _showDebugButton
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton(
+                  heroTag: 'reset_db',
+                  mini: true,
+                  onPressed: () async {
+                    await SQLHelper.deleteDatabase();
+                    await _initializeApp();
+                  },
+                  child: const Icon(Icons.delete),
+                ),
+                const SizedBox(height: 16),
+                FloatingActionButton(
+                  heroTag: 'add_memory',
+                  onPressed: () => _showForm(null),
+                  child: const Icon(Icons.add),
+                ),
+              ],
+            )
+          : FloatingActionButton(
+              heroTag: 'add_memory',
+              onPressed: () => _showForm(null),
+              child: const Icon(Icons.add),
+            ),
     );
   }
 
@@ -361,4 +603,29 @@ class _HomePageState extends State<HomePage> {
     _descriptionController.dispose();
     super.dispose();
   }
+}
+
+class _StarsPainter extends CustomPainter {
+  final Random random;
+  
+  const _StarsPainter({required this.random});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    for (int i = 0; i < 150; i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height;
+      final radius = random.nextDouble() * 1.5;
+      final opacity = random.nextDouble() * 0.5 + 0.1;
+      paint.color = Colors.white.withOpacity(opacity);
+      canvas.drawCircle(Offset(x, y), radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

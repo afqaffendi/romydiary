@@ -4,11 +4,11 @@ import 'homepage.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MyApp());
+  runApp(const DreamDiaryApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class DreamDiaryApp extends StatelessWidget {
+  const DreamDiaryApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -16,15 +16,15 @@ class MyApp extends StatelessWidget {
       title: 'Dream Diary',
       theme: ThemeData(
         primarySwatch: Colors.deepPurple,
-        textTheme: GoogleFonts.poppinsTextTheme(
+        textTheme: GoogleFonts.quicksandTextTheme(
           Theme.of(context).textTheme,
         ),
-        visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       darkTheme: ThemeData.dark().copyWith(
-        textTheme: GoogleFonts.poppinsTextTheme(
+        textTheme: GoogleFonts.quicksandTextTheme(
           Theme.of(context).textTheme,
         ),
+        scaffoldBackgroundColor: const Color(0xFF0F0B21),
       ),
       home: const HomePage(),
       debugShowCheckedModeBanner: false,
