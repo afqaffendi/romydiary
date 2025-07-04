@@ -19,12 +19,20 @@ class DreamDiaryApp extends StatelessWidget {
         textTheme: GoogleFonts.quicksandTextTheme(
           Theme.of(context).textTheme,
         ),
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          elevation: 0,
+        ),
       ),
       darkTheme: ThemeData.dark().copyWith(
         textTheme: GoogleFonts.quicksandTextTheme(
           Theme.of(context).textTheme,
         ),
         scaffoldBackgroundColor: const Color(0xFF0F0B21),
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          elevation: 0,
+        ),
       ),
       home: const HomePage(),
       debugShowCheckedModeBanner: false,

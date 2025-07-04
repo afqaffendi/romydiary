@@ -67,7 +67,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final TextEditingController _descriptionController = TextEditingController();
   final Random _random = Random();
   bool _isSaving = false;
-  bool _showDebugButton = false; // For testing purposes
 
   @override
   void initState() {
@@ -78,15 +77,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   Future<void> _initializeApp() async {
     try {
-      debugPrint('Initializing database...');
       final db = await SQLHelper.database;
       final tables = await db.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='journals'"
       );
-      debugPrint('Existing tables: $tables');
       
       if (tables.isEmpty) {
-        debugPrint('Creating journals table...');
         await db.execute('''
           CREATE TABLE journals(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,7 +94,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
       await _refreshJournals();
     } catch (e) {
-      debugPrint('Initialization error: $e');
       _showError('Failed to initialize app: ${e.toString()}');
     } finally {
       if (mounted) {
@@ -109,18 +104,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   Future<void> _refreshJournals() async {
     try {
-      debugPrint('Refreshing journals...');
       final data = await SQLHelper.getItems();
-      debugPrint('Retrieved ${data.length} items');
-      
       if (mounted) {
-        setState(() {
-          _journals = data;
-          debugPrint('Journals updated: ${_journals.length} items');
-        });
+        setState(() => _journals = data);
       }
     } catch (e) {
-      debugPrint('Refresh error: $e');
       _showError('Failed to load entries: ${e.toString()}');
     }
   }
@@ -133,14 +121,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
     setState(() => _isSaving = true);
     try {
-      debugPrint('Saving item: ${_titleController.text}');
       final id = await SQLHelper.createItem(
         _titleController.text,
         _descriptionController.text,
       );
       
-      debugPrint('Saved item with ID: $id');
-
       if (id > 0) {
         _titleController.clear();
         _descriptionController.clear();
@@ -151,7 +136,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _showError('Failed to save memory');
       }
     } catch (e) {
-      debugPrint('Save error: $e');
       _showError('Error saving memory: ${e.toString()}');
     } finally {
       if (mounted) {
@@ -189,6 +173,33 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         setState(() => _isSaving = false);
       }
     }
+  }
+
+  Future<void> _confirmDelete(int id) async {
+    return showDialog(
+      context: context,
+      builder: (context) => GlassContainer(
+        blur: 15,
+        child: AlertDialog(
+          title: Text('Delete Entry', style: GoogleFonts.quicksand(color: Colors.white)),
+          content: Text('Are you sure?', style: GoogleFonts.quicksand(color: Colors.white70)),
+          backgroundColor: Colors.transparent,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel', style: GoogleFonts.quicksand(color: Colors.white70)),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await _deleteItem(id);
+              },
+              child: Text('Delete', style: GoogleFonts.quicksand(color: Colors.red)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _deleteItem(int id) async {
@@ -312,6 +323,93 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
+  Widget _buildEmptyState() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.auto_awesome,
+          size: 60,
+          color: Colors.deepPurple.withOpacity(0.5),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'No dreams recorded yet!\nTap the + button to begin',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.quicksand(
+            fontSize: 18,
+            color: Colors.white70,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildJournalCard(Map<String, dynamic> journal, BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: GlassContainer(
+        blur: 10,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => _showForm(journal['id']),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        journal['title'],
+                        style: GoogleFonts.quicksand(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.white70),
+                      onPressed: () => _confirmDelete(journal['id']),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  journal['description'] ?? '',
+                  style: GoogleFonts.quicksand(
+                    color: Colors.white70,
+                  ),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text(
+                      journal['createdAt'] != null 
+                          ? journal['createdAt'].toString().substring(0, 10)
+                          : '',
+                      style: GoogleFonts.quicksand(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -348,71 +446,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           borderRadius: BorderRadius.circular(10),
         ),
         duration: const Duration(seconds: 3),
-      ),
-    );
-  }
-
-  Widget _buildJournalCard(Map<String, dynamic> journal, BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: GlassContainer(
-        blur: 10,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: () => _showForm(journal['id']),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        journal['title'],
-                        style: GoogleFonts.quicksand(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.white70),
-                      onPressed: () => _deleteItem(journal['id']),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  journal['description'] ?? '',
-                  style: GoogleFonts.quicksand(
-                    color: Colors.white70,
-                  ),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Text(
-                      journal['createdAt'] != null 
-                          ? journal['createdAt'].toString().substring(0, 10)
-                          : '',
-                      style: GoogleFonts.quicksand(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -466,14 +499,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     ),
                   ),
                   pinned: true,
-                  actions: [
-                    IconButton(
-                      icon: const Icon(Icons.bug_report),
-                      onPressed: () {
-                        setState(() => _showDebugButton = !_showDebugButton);
-                      },
-                    ),
-                  ],
                 ),
                 
                 _isLoading
@@ -505,27 +530,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                         ? SliverToBoxAdapter(
                             child: SizedBox(
                               height: MediaQuery.of(context).size.height * 0.6,
-                              child: Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.auto_awesome,
-                                      size: 60,
-                                      color: Colors.deepPurple.withOpacity(0.5),
-                                    ),
-                                    const SizedBox(height: 20),
-                                    Text(
-                                      'No dreams recorded yet!\nTap the + button to begin',
-                                      textAlign: TextAlign.center,
-                                      style: GoogleFonts.quicksand(
-                                        fontSize: 18,
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                              child: _buildEmptyState(),
                             ),
                           )
                         : SliverPadding(
@@ -567,32 +572,30 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         ],
       ),
       
-      floatingActionButton: _showDebugButton
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FloatingActionButton(
-                  heroTag: 'reset_db',
-                  mini: true,
-                  onPressed: () async {
-                    await SQLHelper.deleteDatabase();
-                    await _initializeApp();
-                  },
-                  child: const Icon(Icons.delete),
-                ),
-                const SizedBox(height: 16),
-                FloatingActionButton(
-                  heroTag: 'add_memory',
-                  onPressed: () => _showForm(null),
-                  child: const Icon(Icons.add),
-                ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showForm(null),
+        child: Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+              colors: [
+                Colors.deepPurple,
+                Colors.purpleAccent,
               ],
-            )
-          : FloatingActionButton(
-              heroTag: 'add_memory',
-              onPressed: () => _showForm(null),
-              child: const Icon(Icons.add),
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.deepPurple.withOpacity(0.4),
+                blurRadius: 10,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: const Icon(Icons.add, size: 30),
+        ),
+      ),
     );
   }
 
