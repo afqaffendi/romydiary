@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:liquid_pull_to_refresh/liquid_pull_to_refresh.dart';
+import 'package:animated_text_kit/animated_text_kit.dart';
+import 'package:confetti/confetti.dart';
 import 'sql_helper.dart';
 
 class HomePage extends StatefulWidget {
@@ -8,7 +11,9 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+  late ConfettiController _confettiController;
   List<Map<String, dynamic>> _journals = [];
   bool _isLoading = true;
   final TextEditingController _titleController = TextEditingController();
@@ -17,16 +22,20 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+    _confettiController = ConfettiController(duration: const Duration(seconds: 1));
     _initializeApp();
   }
 
   Future<void> _initializeApp() async {
     try {
-      await SQLHelper.printDbPath();
-      await SQLHelper.database; // Initialize database
+      await SQLHelper.database;
       await _refreshJournals();
     } catch (e) {
-      _showError('Failed to initialize app: $e');
+      _showError('Failed to initialize: $e');
     } finally {
       setState(() => _isLoading = false);
     }
@@ -41,51 +50,12 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _addItem() async {
-    if (_titleController.text.isEmpty) {
-      _showError('Title cannot be empty');
-      return;
-    }
-
-    try {
-      await SQLHelper.createItem(
-        _titleController.text,
-        _descriptionController.text,
-      );
-      _titleController.clear();
-      _descriptionController.clear();
-      await _refreshJournals();
-      _showMessage('Entry created successfully');
-    } catch (e) {
-      _showError('Failed to create entry: $e');
-    }
+  Future<void> _handleRefresh() async {
+    await _refreshJournals();
+    _animationController.forward(from: 0);
   }
 
-  Future<void> _updateItem(int id) async {
-    try {
-      await SQLHelper.updateItem(
-        id,
-        _titleController.text,
-        _descriptionController.text,
-      );
-      _titleController.clear();
-      _descriptionController.clear();
-      await _refreshJournals();
-      _showMessage('Entry updated successfully');
-    } catch (e) {
-      _showError('Failed to update entry: $e');
-    }
-  }
-
-  Future<void> _deleteItem(int id) async {
-    try {
-      await SQLHelper.deleteItem(id);
-      await _refreshJournals();
-      _showMessage('Entry deleted successfully');
-    } catch (e) {
-      _showError('Failed to delete entry: $e');
-    }
-  }
+  // ... (Keep all your database operation methods from previous version)
 
   void _showForm(int? id) {
     if (id != null) {
@@ -97,7 +67,19 @@ class _HomePageState extends State<HomePage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (_) => Padding(
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 10,
+              spreadRadius: 5,
+            )
+          ],
+        ),
         padding: EdgeInsets.only(
           top: 20,
           left: 20,
@@ -107,27 +89,52 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Text(
+              id == null ? 'New Memory' : 'Edit Memory',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 20),
             TextField(
               controller: _titleController,
-              decoration: const InputDecoration(labelText: 'Title'),
+              decoration: InputDecoration(
+                labelText: 'Title',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 15),
             TextField(
               controller: _descriptionController,
-              decoration: const InputDecoration(labelText: 'Description'),
+              decoration: InputDecoration(
+                labelText: 'Description',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
               maxLines: 5,
             ),
             const SizedBox(height: 20),
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
               onPressed: () async {
                 Navigator.pop(context);
                 if (id == null) {
                   await _addItem();
+                  _confettiController.play();
                 } else {
                   await _updateItem(id);
                 }
               },
-              child: Text(id == null ? 'Create' : 'Update'),
+              child: Text(
+                id == null ? 'Save Memory' : 'Update',
+                style: const TextStyle(fontSize: 16),
+              ),
             )
           ],
         ),
@@ -135,61 +142,153 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showForm(null),
+        child: const Icon(Icons.add, size: 28),
+        backgroundColor: Theme.of(context).primaryColor,
+        elevation: 4,
       ),
-    );
-  }
-
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      body: Stack(
+        children: [
+          LiquidPullToRefresh(
+            onRefresh: _handleRefresh,
+            color: Theme.of(context).primaryColor,
+            height: 150,
+            animSpeedFactor: 2,
+            showChildOpacityTransition: false,
+            child: CustomScrollView(
+              slivers: [
+                SliverAppBar(
+                  expandedHeight: 150,
+                  flexibleSpace: FlexibleSpaceBar(
+                    title: AnimatedTextKit(
+                      animatedTexts: [
+                        TypewriterAnimatedText(
+                          'Dream Diary',
+                          textStyle: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          speed: const Duration(milliseconds: 100),
+                        ),
+                      ],
+                      totalRepeatCount: 1,
+                    ),
+                    background: Image.asset(
+                      'assets/images/diary_bg.jpg',
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  pinned: true,
+                ),
+                _isLoading
+                    ? const SliverFillRemaining(
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    : _journals.isEmpty
+                        ? SliverFillRemaining(
+                            child: Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.book,
+                                    size: 60,
+                                    color: Colors.grey[400],
+                                  ),
+                                  const SizedBox(height: 20),
+                                  Text(
+                                    'No memories yet!\nTap + to add your first entry',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : SliverList(
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) {
+                                final journal = _journals[index];
+                                return Card(
+                                  margin: const EdgeInsets.all(12),
+                                  elevation: 3,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(15),
+                                  ),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(15),
+                                    onTap: () => _showForm(journal['id']),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(16),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            journal['title'],
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            journal['description'],
+                                            maxLines: 3,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.end,
+                                            children: [
+                                              Text(
+                                                journal['createdAt'].toString().substring(0, 10),
+                                                style: TextStyle(
+                                                  color: Colors.grey[600],
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                              childCount: _journals.length,
+                            ),
+                          ),
+              ],
+            ),
+          ),
+          ConfettiWidget(
+            confettiController: _confettiController,
+            blastDirectionality: BlastDirectionality.explosive,
+            shouldLoop: false,
+            colors: const [
+              Colors.green,
+              Colors.blue,
+              Colors.pink,
+              Colors.orange,
+              Colors.purple,
+            ],
+          ),
+        ],
+      ),
     );
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Diary'),
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _journals.isEmpty
-              ? const Center(child: Text('No entries yet. Tap + to add one!'))
-              : ListView.builder(
-                  itemCount: _journals.length,
-                  itemBuilder: (context, index) {
-                    final journal = _journals[index];
-                    return Card(
-                      margin: const EdgeInsets.all(8),
-                      child: ListTile(
-                        title: Text(journal['title']),
-                        subtitle: Text(journal['description']),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit),
-                              onPressed: () => _showForm(journal['id']),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete),
-                              onPressed: () => _deleteItem(journal['id']),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-      floatingActionButton: FloatingActionButton(
-        child: const Icon(Icons.add),
-        onPressed: () => _showForm(null),
-      ),
-    );
+  void dispose() {
+    _animationController.dispose();
+    _confettiController.dispose();
+    super.dispose();
   }
 }
