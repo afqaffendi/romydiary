@@ -11,8 +11,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
-  late AnimationController _animationController;
+class _HomePageState extends State<HomePage> {
   late ConfettiController _confettiController;
   List<Map<String, dynamic>> _journals = [];
   bool _isLoading = true;
@@ -22,17 +21,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    );
-    _confettiController = ConfettiController(duration: const Duration(seconds: 1));
+    _confettiController =
+        ConfettiController(duration: const Duration(seconds: 1));
     _initializeApp();
   }
 
   Future<void> _initializeApp() async {
     try {
-      await SQLHelper.database;
+      await SQLHelper.database; // initialize DB
       await _refreshJournals();
     } catch (e) {
       _showError('Failed to initialize: $e');
@@ -52,14 +48,58 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   Future<void> _handleRefresh() async {
     await _refreshJournals();
-    _animationController.forward(from: 0);
   }
 
-  // ... (Keep all your database operation methods from previous version)
+  Future<void> _addItem() async {
+    try {
+      await SQLHelper.createItem(
+        _titleController.text,
+        _descriptionController.text,
+      );
+      await _refreshJournals();
+      _confettiController.play();
+    } catch (e) {
+      _showError('Failed to add memory: $e');
+    }
+  }
+
+  Future<void> _updateItem(int id) async {
+    try {
+      await SQLHelper.updateItem(
+        id,
+        _titleController.text,
+        _descriptionController.text,
+      );
+      await _refreshJournals();
+    } catch (e) {
+      _showError('Failed to update memory: $e');
+    }
+  }
+
+  Future<void> _deleteItem(int id) async {
+    try {
+      await SQLHelper.deleteItem(id);
+      await _refreshJournals();
+    } catch (e) {
+      _showError('Failed to delete memory: $e');
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
 
   void _showForm(int? id) {
-    if (id != null) {
-      final existingJournal = _journals.firstWhere((element) => element['id'] == id);
+    if (id == null) {
+      // New entry — clear controllers
+      _titleController.clear();
+      _descriptionController.clear();
+    } else {
+      // Editing existing entry — fill controllers
+      final existingJournal =
+          _journals.firstWhere((element) => element['id'] == id);
       _titleController.text = existingJournal['title'];
       _descriptionController.text = existingJournal['description'];
     }
@@ -126,7 +166,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 Navigator.pop(context);
                 if (id == null) {
                   await _addItem();
-                  _confettiController.play();
                 } else {
                   await _updateItem(id);
                 }
@@ -178,7 +217,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                       totalRepeatCount: 1,
                     ),
                     background: Image.asset(
-                      'assets/images/diary_bg.jpg',
+                      'assets/image/diary_bg.jpeg',
                       fit: BoxFit.cover,
                     ),
                   ),
@@ -225,10 +264,37 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                                   child: InkWell(
                                     borderRadius: BorderRadius.circular(15),
                                     onTap: () => _showForm(journal['id']),
+                                    onLongPress: () => showDialog(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: const Text('Delete Memory'),
+                                        content: const Text(
+                                            'Are you sure you want to delete this memory?'),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () {
+                                              Navigator.of(ctx).pop();
+                                            },
+                                            child: const Text('Cancel'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () async {
+                                              Navigator.of(ctx).pop();
+                                              await _deleteItem(journal['id']);
+                                            },
+                                            child: const Text(
+                                              'Delete',
+                                              style: TextStyle(color: Colors.red),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                     child: Padding(
                                       padding: const EdgeInsets.all(16),
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             journal['title'],
@@ -245,10 +311,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                                           ),
                                           const SizedBox(height: 12),
                                           Row(
-                                            mainAxisAlignment: MainAxisAlignment.end,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.end,
                                             children: [
                                               Text(
-                                                journal['createdAt'].toString().substring(0, 10),
+                                                journal['createdAt']
+                                                    .toString()
+                                                    .substring(0, 10),
                                                 style: TextStyle(
                                                   color: Colors.grey[600],
                                                   fontSize: 12,
@@ -287,8 +356,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   @override
   void dispose() {
-    _animationController.dispose();
     _confettiController.dispose();
+    _titleController.dispose();
+    _descriptionController.dispose();
     super.dispose();
   }
 }
