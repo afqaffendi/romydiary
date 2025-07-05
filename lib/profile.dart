@@ -157,7 +157,7 @@ class _ProfilePageState extends State<ProfilePage> {
         child: CustomScrollView(
           slivers: [
             SliverAppBar(
-              expandedHeight: 200,
+              expandedHeight: 100,
               flexibleSpace: FlexibleSpaceBar(
                 title: Text(
                   'My Profile',

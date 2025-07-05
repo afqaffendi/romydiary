@@ -554,6 +554,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   pinned: true,
                   actions: [
                     IconButton(
+                      icon: const Icon(Icons.settings),
+                      onPressed: () => Navigator.pushNamed(context, '/settings'),
+                    ),
+                    IconButton(
                       icon: const Icon(Icons.person),
                       onPressed: () => Navigator.pushNamed(context, '/profile'),
                     ),
