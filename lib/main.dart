@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'homepage.dart';
+import 'profile.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,6 +36,9 @@ class DreamDiaryApp extends StatelessWidget {
         ),
       ),
       home: const HomePage(),
+      routes: {
+        '/profile': (context) => const ProfilePage(),
+      },
       debugShowCheckedModeBanner: false,
     );
   }

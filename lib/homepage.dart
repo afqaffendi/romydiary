@@ -1,12 +1,14 @@
+import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:liquid_pull_to_refresh/liquid_pull_to_refresh.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:confetti/confetti.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:image_picker/image_picker.dart';
 import 'sql_helper.dart';
 
 class GlassContainer extends StatelessWidget {
@@ -67,12 +69,29 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final TextEditingController _descriptionController = TextEditingController();
   final Random _random = Random();
   bool _isSaving = false;
+  int _dreamCount = 0;
 
   @override
   void initState() {
     super.initState();
     _confettiController = ConfettiController(duration: const Duration(seconds: 1));
     _initializeApp();
+    _loadDreamCount();
+  }
+
+  Future<void> _loadDreamCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _dreamCount = prefs.getInt('dreamCount') ?? 0;
+    });
+  }
+
+  Future<void> _updateDreamCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _dreamCount = _journals.length;
+      prefs.setInt('dreamCount', _dreamCount);
+    });
   }
 
   Future<void> _initializeApp() async {
@@ -107,6 +126,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final data = await SQLHelper.getItems();
       if (mounted) {
         setState(() => _journals = data);
+        _updateDreamCount();
       }
     } catch (e) {
       _showError('Failed to load entries: ${e.toString()}');
@@ -213,6 +233,30 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
     } catch (e) {
       _showError('Error deleting memory: ${e.toString()}');
+    }
+  }
+
+  Future<void> _selectBirthDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.dark(
+              primary: Colors.deepPurple,
+              surface: Color(0xFF1A1A2E),
+            ),
+            dialogBackgroundColor: Color(0xFF0F0B21),
+          ),
+          child: child ?? Container(), // Fixed missing child parameter
+        );
+      },
+    );
+    if (picked != null) {
+      // Handle the selected date
     }
   }
 
@@ -346,63 +390,72 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Widget _buildJournalCard(Map<String, dynamic> journal, BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: GlassContainer(
-        blur: 10,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: () => _showForm(journal['id']),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        journal['title'],
+    return AnimationConfiguration.staggeredList(
+      position: _journals.indexOf(journal),
+      duration: const Duration(milliseconds: 500),
+      child: SlideAnimation(
+        verticalOffset: 50.0,
+        child: FadeInAnimation(
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            child: GlassContainer(
+              blur: 10,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => _showForm(journal['id']),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              journal['title'],
+                              style: GoogleFonts.quicksand(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.white70),
+                            onPressed: () => _confirmDelete(journal['id']),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        journal['description'] ?? '',
                         style: GoogleFonts.quicksand(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                          color: Colors.white70,
                         ),
-                        maxLines: 1,
+                        maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.white70),
-                      onPressed: () => _confirmDelete(journal['id']),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  journal['description'] ?? '',
-                  style: GoogleFonts.quicksand(
-                    color: Colors.white70,
-                  ),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Text(
-                      journal['createdAt'] != null 
-                          ? journal['createdAt'].toString().substring(0, 10)
-                          : '',
-                      style: GoogleFonts.quicksand(
-                        color: Colors.white70,
-                        fontSize: 12,
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            journal['createdAt'] != null 
+                                ? journal['createdAt'].toString().substring(0, 10)
+                                : '',
+                            style: GoogleFonts.quicksand(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -470,7 +523,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             child: CustomScrollView(
               slivers: [
                 SliverAppBar(
-                  expandedHeight: 200,
+                  expandedHeight: 100,
                   flexibleSpace: FlexibleSpaceBar(
                     title: Text(
                       'Dream Diary',
@@ -499,6 +552,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     ),
                   ),
                   pinned: true,
+                  actions: [
+                    IconButton(
+                      icon: const Icon(Icons.person),
+                      onPressed: () => Navigator.pushNamed(context, '/profile'),
+                    ),
+                  ],
                 ),
                 
                 _isLoading
@@ -538,17 +597,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                             sliver: SliverList(
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
-                                  final journal = _journals[index];
-                                  return AnimationConfiguration.staggeredList(
-                                    position: index,
-                                    duration: const Duration(milliseconds: 500),
-                                    child: SlideAnimation(
-                                      verticalOffset: 50.0,
-                                      child: FadeInAnimation(
-                                        child: _buildJournalCard(journal, context),
-                                      ),
-                                    ),
-                                  );
+                                  return _buildJournalCard(_journals[index], context);
                                 },
                                 childCount: _journals.length,
                               ),

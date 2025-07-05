@@ -1,31 +1,42 @@
 name: dream_diary
-description: A beautiful diary app with creative UI
+description: A beautiful dream journal app with glassmorphism effects
 
 version: 1.0.0+1
 
 environment:
-  sdk: '>=2.17.0 <4.0.0'
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.2  # Add this if using iOS-style icons
-  sqflite: ^2.3.0
-  path: ^1.8.3
-  intl: ^0.18.1
-  google_fonts: ^4.0.4
+  cupertino_icons: ^1.0.2
+  google_fonts: ^5.1.0
   liquid_pull_to_refresh: ^3.0.0
-  confetti: ^0.7.0
   shimmer: ^2.0.0
   flutter_staggered_animations: ^1.1.0
-  curved_navigation_bar: ^1.0.3
+  confetti: ^0.7.0
+  sqflite: ^2.3.0
+  path: ^1.8.0
+  image_picker: ^0.8.7+3  # For profile pictures
+  shared_preferences: ^2.2.0  # For local profile storage
+  intl: ^0.18.1  # For date formatting
+  
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^2.0.0
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
   assets:
-    - assets/image/diary_bg.jpeg  # Fixed path
+    - assets/icon/icon.png
+
+flutter_icons:
+  android: "launcher_icon"
+  min_sdk_android: 21
+  ios: true
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#0F0B21"
+  adaptive_icon_foreground: "assets/icon/foreground.png"  # Optional
