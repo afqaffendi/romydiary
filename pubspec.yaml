@@ -20,7 +20,7 @@ dependencies:
   image_picker: ^0.8.7+3  # For profile pictures
   shared_preferences: ^2.2.0  # For local profile storage
   intl: ^0.18.1  # For date formatting
-  http: ^0.13.5
+  http: 1.4.0
 
 dev_dependencies:
   flutter_test:

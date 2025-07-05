@@ -1,7 +1,50 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:ui';  // Add this import for ImageFilter
+import 'dart:ui'; // For ImageFilter
+
+class GlassContainer extends StatelessWidget {
+  final Widget child;
+  final double borderRadius;
+  final double blur;
+  final double border;
+
+  const GlassContainer({
+    Key? key,
+    required this.child,
+    this.borderRadius = 20,
+    this.blur = 10,
+    this.border = 1,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(
+          width: border,
+          color: Colors.white.withOpacity(0.2),
+        ),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withOpacity(0.15),
+            Colors.white.withOpacity(0.05),
+          ],
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
 
 class SettingsPage extends StatefulWidget {
   final Function(bool) onThemeChanged;
@@ -169,6 +212,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     inactiveColor: Colors.deepPurple.withOpacity(0.3),
                     onChanged: (value) {
                       setState(() => _fontSize = value);
+                      widget.onFontSizeChanged(value);
                       _saveSettings();
                     },
                   ),
@@ -236,47 +280,6 @@ class _SettingsPageState extends State<SettingsPage> {
       color: Colors.white.withOpacity(0.1),
       indent: 16,
       endIndent: 16,
-    );
-  }
-}
-
-class GlassContainer extends StatelessWidget {
-  final Widget child;
-  final double borderRadius;
-  final double blur;
-
-  const GlassContainer({
-    Key? key,
-    required this.child,
-    this.borderRadius = 20,
-    this.blur = 10,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(borderRadius),
-        border: Border.all(
-          width: 1,
-          color: Colors.white.withOpacity(0.2),
-        ),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withOpacity(0.15),
-            Colors.white.withOpacity(0.05),
-          ],
-        ),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-          child: child,
-        ),
-      ),
     );
   }
 }

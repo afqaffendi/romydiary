@@ -1,5 +1,5 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For SystemChrome
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'homepage.dart';
@@ -7,17 +7,24 @@ import 'profile.dart';
 import 'settings.dart';
 
 void main() async {
+  // Ensure Flutter binding is initialized
   WidgetsFlutterBinding.ensureInitialized();
   
+  // Set preferred orientations (portrait and landscape)
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
+
+  // Load shared preferences
   final prefs = await SharedPreferences.getInstance();
-  final darkMode = prefs.getBool('darkMode') ?? true;
-  final fontStyle = prefs.getString('fontStyle') ?? 'Quicksand';
-  final fontSize = prefs.getDouble('fontSize') ?? 16.0;
   
   runApp(DreamDiaryApp(
-    initialDarkMode: darkMode,
-    initialFont: fontStyle,
-    initialFontSize: fontSize,
+    initialDarkMode: prefs.getBool('darkMode') ?? true,
+    initialFont: prefs.getString('fontStyle') ?? 'Quicksand',
+    initialFontSize: prefs.getDouble('fontSize') ?? 16.0,
   ));
 }
 
@@ -52,20 +59,17 @@ class _DreamDiaryAppState extends State<DreamDiaryApp> {
 
   void _updateTheme(bool darkMode) async {
     setState(() => _darkMode = darkMode);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('darkMode', darkMode);
+    (await SharedPreferences.getInstance()).setBool('darkMode', darkMode);
   }
 
   void _updateFont(String font) async {
     setState(() => _fontStyle = font);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('fontStyle', font);
+    (await SharedPreferences.getInstance()).setString('fontStyle', font);
   }
 
   void _updateFontSize(double size) async {
     setState(() => _fontSize = size);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('fontSize', size);
+    (await SharedPreferences.getInstance()).setDouble('fontSize', size);
   }
 
   TextTheme _buildTextTheme(TextTheme baseTheme) {
@@ -84,6 +88,7 @@ class _DreamDiaryAppState extends State<DreamDiaryApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Dream Diary',
+      debugShowCheckedModeBanner: false,
       themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
         primarySwatch: Colors.deepPurple,
@@ -147,7 +152,6 @@ class _DreamDiaryAppState extends State<DreamDiaryApp> {
               onFontSizeChanged: _updateFontSize,
             ),
       },
-      debugShowCheckedModeBanner: false,
     );
   }
 }

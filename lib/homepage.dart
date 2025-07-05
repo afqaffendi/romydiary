@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:async';
 import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -7,9 +7,10 @@ import 'package:liquid_pull_to_refresh/liquid_pull_to_refresh.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:confetti/confetti.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 import 'sql_helper.dart';
+import 'api_service.dart';
+import 'filter_sheet.dart';
 
 class GlassContainer extends StatelessWidget {
   final Widget child;
@@ -69,29 +70,35 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final TextEditingController _descriptionController = TextEditingController();
   final Random _random = Random();
   bool _isSaving = false;
-  int _dreamCount = 0;
+  bool _isInterpreting = false;
+  String _interpretation = '';
+  List<String> _dreamThemes = [];
+  Timer? _debounceTimer;
+  
+  // Filter variables
+  String? _searchFilter;
+  DateTime? _startDateFilter;
+  DateTime? _endDateFilter;
 
   @override
   void initState() {
     super.initState();
     _confettiController = ConfettiController(duration: const Duration(seconds: 1));
     _initializeApp();
-    _loadDreamCount();
+    _loadDreamThemes();
   }
 
-  Future<void> _loadDreamCount() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _dreamCount = prefs.getInt('dreamCount') ?? 0;
-    });
-  }
-
-  Future<void> _updateDreamCount() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _dreamCount = _journals.length;
-      prefs.setInt('dreamCount', _dreamCount);
-    });
+  Future<void> _loadDreamThemes() async {
+    try {
+      final themes = await ApiService.getDreamThemes();
+      setState(() => _dreamThemes = themes);
+    } on http.ClientException catch (e) {
+      _showError('Network error: ${e.message}');
+    } on TimeoutException catch (_) {
+      _showError('Request timed out');
+    } catch (e) {
+      _showError('Failed to load themes: ${e.toString()}');
+    }
   }
 
   Future<void> _initializeApp() async {
@@ -115,19 +122,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     } catch (e) {
       _showError('Failed to initialize app: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _refreshJournals() async {
     try {
-      final data = await SQLHelper.getItems();
-      if (mounted) {
-        setState(() => _journals = data);
-        _updateDreamCount();
-      }
+      final data = await SQLHelper.getFilteredItems(
+        searchQuery: _searchFilter,
+        startDate: _startDateFilter,
+        endDate: _endDateFilter,
+      );
+      if (mounted) setState(() => _journals = data);
     } catch (e) {
       _showError('Failed to load entries: ${e.toString()}');
     }
@@ -151,16 +157,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _descriptionController.clear();
         await _refreshJournals();
         _confettiController.play();
-        _showMessage('Memory saved successfully! ✨');
+        _showMessage('Dream saved successfully! ✨');
       } else {
-        _showError('Failed to save memory');
+        _showError('Failed to save dream');
       }
     } catch (e) {
-      _showError('Error saving memory: ${e.toString()}');
+      _showError('Error saving dream: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-      }
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -182,16 +186,28 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _titleController.clear();
         _descriptionController.clear();
         await _refreshJournals();
-        _showMessage('Memory updated successfully!');
+        _showMessage('Dream updated successfully!');
       } else {
-        _showError('Failed to update memory');
+        _showError('Failed to update dream');
       }
     } catch (e) {
-      _showError('Error updating memory: ${e.toString()}');
+      _showError('Error updating dream: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _deleteItem(int id) async {
+    try {
+      final rowsAffected = await SQLHelper.deleteItem(id);
+      if (rowsAffected > 0) {
+        await _refreshJournals();
+        _showMessage('Dream deleted successfully');
+      } else {
+        _showError('Failed to delete dream');
       }
+    } catch (e) {
+      _showError('Error deleting dream: ${e.toString()}');
     }
   }
 
@@ -201,20 +217,24 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       builder: (context) => GlassContainer(
         blur: 15,
         child: AlertDialog(
-          title: Text('Delete Entry', style: GoogleFonts.quicksand(color: Colors.white)),
-          content: Text('Are you sure?', style: GoogleFonts.quicksand(color: Colors.white70)),
+          title: Text('Delete Dream', 
+            style: GoogleFonts.quicksand(color: Colors.white)),
+          content: Text('Are you sure?', 
+            style: GoogleFonts.quicksand(color: Colors.white70)),
           backgroundColor: Colors.transparent,
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('Cancel', style: GoogleFonts.quicksand(color: Colors.white70)),
+              child: Text('Cancel', 
+                style: GoogleFonts.quicksand(color: Colors.white70)),
             ),
             TextButton(
               onPressed: () async {
                 Navigator.pop(context);
                 await _deleteItem(id);
               },
-              child: Text('Delete', style: GoogleFonts.quicksand(color: Colors.red)),
+              child: Text('Delete', 
+                style: GoogleFonts.quicksand(color: Colors.red)),
             ),
           ],
         ),
@@ -222,52 +242,94 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Future<void> _deleteItem(int id) async {
+  Future<void> _interpretDream(String dreamText) async {
+    if (dreamText.isEmpty) {
+      _showError('Please enter a dream description');
+      return;
+    }
+
+    setState(() => _isInterpreting = true);
     try {
-      final rowsAffected = await SQLHelper.deleteItem(id);
-      if (rowsAffected > 0) {
-        await _refreshJournals();
-        _showMessage('Memory deleted successfully');
-      } else {
-        _showError('Failed to delete memory');
-      }
+      final interpretation = await ApiService.interpretDream(dreamText);
+      setState(() => _interpretation = interpretation);
+      _showInterpretationDialog(interpretation);
+    } on http.ClientException {
+      _showError('No internet connection');
+    } on TimeoutException {
+      _showError('Request timed out');
     } catch (e) {
-      _showError('Error deleting memory: ${e.toString()}');
+      _showError('Interpretation failed: ${e.toString()}');
+    } finally {
+      setState(() => _isInterpreting = false);
     }
   }
 
-  Future<void> _selectBirthDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
+  void _showInterpretationDialog(String interpretation) {
+    showDialog(
       context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(1900),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.dark(
-              primary: Colors.deepPurple,
-              surface: Color(0xFF1A1A2E),
+      builder: (context) => GlassContainer(
+        blur: 15,
+        child: AlertDialog(
+          title: Text('Dream Interpretation',
+            style: GoogleFonts.quicksand(
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
             ),
-            dialogBackgroundColor: Color(0xFF0F0B21),
           ),
-          child: child ?? Container(), // Fixed missing child parameter
-        );
-      },
+          backgroundColor: Colors.transparent,
+          content: SingleChildScrollView(
+            child: Text(
+              interpretation,
+              style: GoogleFonts.quicksand(color: Colors.white70),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('OK', 
+                style: GoogleFonts.quicksand(color: Colors.white70)),
+            ),
+          ],
+        ),
+      ),
     );
-    if (picked != null) {
-      // Handle the selected date
-    }
   }
 
-  void _showForm(int? id) {
+  void _showFilterSheet() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => FilterSheet(
+        onApplyFilters: (search, startDate, endDate) {
+          setState(() {
+            _searchFilter = search;
+            _startDateFilter = startDate;
+            _endDateFilter = endDate;
+          });
+          _refreshJournals();
+        },
+      ),
+    );
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _searchFilter = null;
+      _startDateFilter = null;
+      _endDateFilter = null;
+    });
+    _refreshJournals();
+  }
+
+  void _showForm(int? id) async {
     if (id != null) {
-      final existingJournal = _journals.firstWhere((element) => element['id'] == id);
+      final existingJournal = _journals.firstWhere(
+        (element) => element['id'] == id);
       _titleController.text = existingJournal['title'];
       _descriptionController.text = existingJournal['description'] ?? '';
     }
 
-    showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -276,13 +338,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         child: Padding(
           padding: EdgeInsets.only(
             bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 16,
+            right: 16,
+            top: 16,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(height: 20),
               Text(
-                id == null ? '✨ New Memory' : '✏️ Edit Memory',
+                id == null ? '✨ New Dream' : '✏️ Edit Dream',
                 style: GoogleFonts.quicksand(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
@@ -290,73 +354,64 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 ),
               ),
               const SizedBox(height: 20),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: TextField(
-                  controller: _titleController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'Title',
-                    labelStyle: const TextStyle(color: Colors.white70),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.1),
+              TextField(
+                controller: _titleController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Title',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: BorderSide.none,
                   ),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.1),
                 ),
               ),
               const SizedBox(height: 15),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: TextField(
-                  controller: _descriptionController,
-                  style: const TextStyle(color: Colors.white),
-                  maxLines: 5,
-                  decoration: InputDecoration(
-                    labelText: 'Description',
-                    labelStyle: const TextStyle(color: Colors.white70),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.1),
+              TextField(
+                controller: _descriptionController,
+                style: const TextStyle(color: Colors.white),
+                maxLines: 5,
+                decoration: InputDecoration(
+                  labelText: 'Description',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: BorderSide.none,
                   ),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.1),
                 ),
               ),
               const SizedBox(height: 20),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      backgroundColor: Colors.deepPurple.withOpacity(0.8),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
                     ),
-                    onPressed: _isSaving ? null : () async {
-                      Navigator.pop(context);
-                      if (id == null) {
-                        await _addItem();
-                      } else {
-                        await _updateItem(id);
-                      }
-                    },
-                    child: _isSaving
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : Text(
-                            id == null ? 'Save Memory' : 'Update',
-                            style: GoogleFonts.quicksand(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                    backgroundColor: Colors.deepPurple.withOpacity(0.8),
                   ),
+                  onPressed: _isSaving ? null : () async {
+                    Navigator.pop(context);
+                    if (id == null) {
+                      await _addItem();
+                    } else {
+                      await _updateItem(id);
+                    }
+                  },
+                  child: _isSaving
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : Text(
+                          id == null ? 'Save Dream' : 'Update',
+                          style: GoogleFonts.quicksand(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -386,80 +441,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildJournalCard(Map<String, dynamic> journal, BuildContext context) {
-    return AnimationConfiguration.staggeredList(
-      position: _journals.indexOf(journal),
-      duration: const Duration(milliseconds: 500),
-      child: SlideAnimation(
-        verticalOffset: 50.0,
-        child: FadeInAnimation(
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            child: GlassContainer(
-              blur: 10,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: () => _showForm(journal['id']),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              journal['title'],
-                              style: GoogleFonts.quicksand(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.white70),
-                            onPressed: () => _confirmDelete(journal['id']),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        journal['description'] ?? '',
-                        style: GoogleFonts.quicksand(
-                          color: Colors.white70,
-                        ),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Text(
-                            journal['createdAt'] != null 
-                                ? journal['createdAt'].toString().substring(0, 10)
-                                : '',
-                            style: GoogleFonts.quicksand(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 
@@ -499,6 +480,82 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           borderRadius: BorderRadius.circular(10),
         ),
         duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Widget _buildJournalCard(Map<String, dynamic> journal, BuildContext context) {
+    return AnimationConfiguration.staggeredList(
+      position: _journals.indexOf(journal),
+      duration: const Duration(milliseconds: 500),
+      child: SlideAnimation(
+        verticalOffset: 50.0,
+        child: FadeInAnimation(
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            child: GlassContainer(
+              blur: 10,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => _showForm(journal['id']),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              journal['title'],
+                              style: GoogleFonts.quicksand(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.psychology, color: Colors.white70),
+                            onPressed: () => _interpretDream(journal['description'] ?? ''),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.white70),
+                            onPressed: () => _confirmDelete(journal['id']),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        journal['description'] ?? '',
+                        style: GoogleFonts.quicksand(
+                          color: Colors.white70,
+                        ),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            journal['createdAt']?.toString().substring(0, 10) ?? '',
+                            style: GoogleFonts.quicksand(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -552,6 +609,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     ),
                   ),
                   pinned: true,
+                  // Left side buttons (Filter & Clear Filter)
+                  leading: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.filter_alt),
+                        onPressed: _showFilterSheet,
+                      ),
+                    ],
+                  ),
+                  // Right side buttons (Settings & Profile)
                   actions: [
                     IconButton(
                       icon: const Icon(Icons.settings),
@@ -563,6 +630,42 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     ),
                   ],
                 ),
+                
+                if (_searchFilter != null || _startDateFilter != null || _endDateFilter != null)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Wrap(
+                        spacing: 8,
+                        children: [
+                          if (_searchFilter != null)
+                            Chip(
+                              label: Text('Search: $_searchFilter'),
+                              onDeleted: () {
+                                setState(() => _searchFilter = null);
+                                _refreshJournals();
+                              },
+                            ),
+                          if (_startDateFilter != null)
+                            Chip(
+                              label: Text('From: ${_startDateFilter!.toLocal().toString().split(' ')[0]}'),
+                              onDeleted: () {
+                                setState(() => _startDateFilter = null);
+                                _refreshJournals();
+                              },
+                            ),
+                          if (_endDateFilter != null)
+                            Chip(
+                              label: Text('To: ${_endDateFilter!.toLocal().toString().split(' ')[0]}'),
+                              onDeleted: () {
+                                setState(() => _endDateFilter = null);
+                                _refreshJournals();
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
                 
                 _isLoading
                     ? SliverToBoxAdapter(
@@ -579,9 +682,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                                   const SizedBox(height: 20),
                                   Text(
                                     'Loading your dreams...',
-                                    style: GoogleFonts.quicksand(
-                                      fontSize: 18,
-                                    ),
+                                    style: GoogleFonts.quicksand(fontSize: 18),
                                   ),
                                 ],
                               ),
@@ -600,9 +701,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                             padding: const EdgeInsets.all(16),
                             sliver: SliverList(
                               delegate: SliverChildBuilderDelegate(
-                                (context, index) {
-                                  return _buildJournalCard(_journals[index], context);
-                                },
+                                (context, index) => _buildJournalCard(_journals[index], context),
                                 childCount: _journals.length,
                               ),
                             ),
@@ -610,6 +709,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               ],
             ),
           ),
+          
+          if (_isInterpreting)
+            const Center(child: CircularProgressIndicator()),
           
           ConfettiWidget(
             confettiController: _confettiController,
@@ -624,7 +726,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           ),
         ],
       ),
-      
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showForm(null),
         child: Container(
@@ -632,11 +733,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           height: 60,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            gradient: LinearGradient(
-              colors: [
-                Colors.deepPurple,
-                Colors.purpleAccent,
-              ],
+            gradient: const LinearGradient(
+              colors: [Colors.deepPurple, Colors.purpleAccent],
             ),
             boxShadow: [
               BoxShadow(
@@ -657,6 +755,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _confettiController.dispose();
     _titleController.dispose();
     _descriptionController.dispose();
+    _debounceTimer?.cancel();
     super.dispose();
   }
 }
