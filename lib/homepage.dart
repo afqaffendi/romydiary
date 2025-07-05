@@ -7,9 +7,7 @@ import 'package:liquid_pull_to_refresh/liquid_pull_to_refresh.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:confetti/confetti.dart';
-import 'package:http/http.dart' as http;
 import 'sql_helper.dart';
-import 'api_service.dart';
 import 'filter_sheet.dart';
 
 class GlassContainer extends StatelessWidget {
@@ -70,9 +68,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final TextEditingController _descriptionController = TextEditingController();
   final Random _random = Random();
   bool _isSaving = false;
-  bool _isInterpreting = false;
-  String _interpretation = '';
-  List<String> _dreamThemes = [];
   Timer? _debounceTimer;
   
   // Filter variables
@@ -85,20 +80,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     super.initState();
     _confettiController = ConfettiController(duration: const Duration(seconds: 1));
     _initializeApp();
-    _loadDreamThemes();
-  }
-
-  Future<void> _loadDreamThemes() async {
-    try {
-      final themes = await ApiService.getDreamThemes();
-      setState(() => _dreamThemes = themes);
-    } on http.ClientException catch (e) {
-      _showError('Network error: ${e.message}');
-    } on TimeoutException catch (_) {
-      _showError('Request timed out');
-    } catch (e) {
-      _showError('Failed to load themes: ${e.toString()}');
-    }
   }
 
   Future<void> _initializeApp() async {
@@ -235,59 +216,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               },
               child: Text('Delete', 
                 style: GoogleFonts.quicksand(color: Colors.red)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _interpretDream(String dreamText) async {
-    if (dreamText.isEmpty) {
-      _showError('Please enter a dream description');
-      return;
-    }
-
-    setState(() => _isInterpreting = true);
-    try {
-      final interpretation = await ApiService.interpretDream(dreamText);
-      setState(() => _interpretation = interpretation);
-      _showInterpretationDialog(interpretation);
-    } on http.ClientException {
-      _showError('No internet connection');
-    } on TimeoutException {
-      _showError('Request timed out');
-    } catch (e) {
-      _showError('Interpretation failed: ${e.toString()}');
-    } finally {
-      setState(() => _isInterpreting = false);
-    }
-  }
-
-  void _showInterpretationDialog(String interpretation) {
-    showDialog(
-      context: context,
-      builder: (context) => GlassContainer(
-        blur: 15,
-        child: AlertDialog(
-          title: Text('Dream Interpretation',
-            style: GoogleFonts.quicksand(
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          backgroundColor: Colors.transparent,
-          content: SingleChildScrollView(
-            child: Text(
-              interpretation,
-              style: GoogleFonts.quicksand(color: Colors.white70),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('OK', 
-                style: GoogleFonts.quicksand(color: Colors.white70)),
             ),
           ],
         ),
@@ -444,42 +372,114 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
+  Widget _buildDrawer(BuildContext context) {
+    return GlassContainer(
+      blur: 15,
+      borderRadius: 0,
+      child: Drawer(
+        backgroundColor: Colors.transparent,
+        child: ListView(
+          padding: EdgeInsets.zero,
           children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 8),
-            Text(message),
+            // Compact drawer header
+            SizedBox(
+              height: 150, // Reduced height from default 160
+              child: DrawerHeader(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.deepPurple.withOpacity(0.7),
+                      Colors.purple.withOpacity(0.5),
+                    ],
+                  ),
+                ),
+                padding: const EdgeInsets.all(16),
+                margin: EdgeInsets.zero, // Remove default margin
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Dream Diary',
+                      style: GoogleFonts.quicksand(
+                        fontSize: 20, // Smaller font size
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Your dream journal',
+                      style: GoogleFonts.quicksand(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            
+            // Navigation items
+            ListTile(
+              leading: const Icon(Icons.home, color: Colors.white70),
+              title: Text(
+                'Home',
+                style: GoogleFonts.quicksand(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person, color: Colors.white70),
+              title: Text(
+                'Profile',
+                style: GoogleFonts.quicksand(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/profile');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings, color: Colors.white70),
+              title: Text(
+                'Settings',
+                style: GoogleFonts.quicksand(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/settings');
+              },
+            ),
+            const Divider(color: Colors.white54),
+            ListTile(
+              leading: const Icon(Icons.filter_alt, color: Colors.white70),
+              title: Text(
+                'Filters',
+                style: GoogleFonts.quicksand(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showFilterSheet();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.clear_all, color: Colors.white70),
+              title: Text(
+                'Clear Filters',
+                style: GoogleFonts.quicksand(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _clearFilters();
+              },
+            ),
           ],
         ),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.error, color: Colors.white),
-            const SizedBox(width: 8),
-            Text(message),
-          ],
-        ),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -516,10 +516,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.psychology, color: Colors.white70),
-                            onPressed: () => _interpretDream(journal['description'] ?? ''),
                           ),
                           IconButton(
                             icon: const Icon(Icons.delete, color: Colors.white70),
@@ -560,10 +556,51 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(message),
+          ],
+        ),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.error, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(message),
+          ],
+        ),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F0B21),
+      drawer: _buildDrawer(context),
       body: Stack(
         children: [
           CustomPaint(
@@ -580,7 +617,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             child: CustomScrollView(
               slivers: [
                 SliverAppBar(
-                  expandedHeight: 100,
+                  expandedHeight: 50,
                   flexibleSpace: FlexibleSpaceBar(
                     title: Text(
                       'Dream Diary',
@@ -609,24 +646,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     ),
                   ),
                   pinned: true,
-                  // Left side buttons (Filter & Clear Filter)
-                  leading: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.filter_alt),
-                        onPressed: _showFilterSheet,
-                      ),
-                    ],
+                  leading: Builder(  // <-- This is the key fix
+                    builder: (context) => IconButton(
+                      icon: const Icon(Icons.menu),
+                      onPressed: () => Scaffold.of(context).openDrawer(),
+                    ),
                   ),
-                  // Right side buttons (Settings & Profile)
                   actions: [
                     IconButton(
-                      icon: const Icon(Icons.settings),
-                      onPressed: () => Navigator.pushNamed(context, '/settings'),
+                      icon: const Icon(Icons.filter_alt),
+                      onPressed: _showFilterSheet,
                     ),
                     IconButton(
-                      icon: const Icon(Icons.person),
-                      onPressed: () => Navigator.pushNamed(context, '/profile'),
+                      icon: const Icon(Icons.clear_all),
+                      onPressed: _clearFilters,
                     ),
                   ],
                 ),
@@ -709,9 +742,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               ],
             ),
           ),
-          
-          if (_isInterpreting)
-            const Center(child: CircularProgressIndicator()),
           
           ConfettiWidget(
             confettiController: _confettiController,

@@ -21,6 +21,8 @@ dependencies:
   shared_preferences: ^2.2.0  # For local profile storage
   intl: ^0.18.1  # For date formatting
   http: 1.4.0
+  local_auth: ^2.1.5
+  crypto: ^3.0.2
 
 dev_dependencies:
   flutter_test:
